@@ -1,0 +1,4 @@
+skills/gstack/bin/gstack-global-discover filter=lfs diff=lfs merge=lfs -text
+skills/gstack/browse/dist/browse filter=lfs diff=lfs merge=lfs -text
+skills/gstack/browse/dist/find-browse filter=lfs diff=lfs merge=lfs -text
+skills/gstack/design/dist/design filter=lfs diff=lfs merge=lfs -text
