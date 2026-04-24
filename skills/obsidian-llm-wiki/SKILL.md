@@ -1,327 +1,449 @@
 ---
 name: obsidian-llm-wiki
-description: |
-  Transform any directory (or Obsidian vault) into a self-maintaining LLM-powered wiki
-  using Andrej Karpathy's three-layer knowledge base pattern. Claude reads raw sources
-  (articles, transcripts, PDFs, notes, screenshots) and compiles them into an
-  interconnected wiki — handling all the bookkeeping so you don't have to.
-  Use when asked to "set up my LLM wiki", "ingest this into my wiki", "query my wiki",
-  "lint my wiki", or any variant of building/maintaining a personal knowledge base.
-  Trigger on: /wiki-setup, /ingest, /wiki-query, /process-inbox, /lint-wiki, /daily-journal.
-origin: karpathy-llm-wiki
-tools:
-  - Read
-  - Write
-  - Edit
-  - Bash
-  - Glob
-  - Grep
-  - WebFetch
+description: >
+  Build and maintain an LLM-powered second brain in Obsidian using Andrej Karpathy's LLM Wiki
+  pattern. Run Claude Code inside the vault to process raw sources into a structured, cross-referenced
+  wiki. Use when setting up an AI-maintained knowledge base, ingesting articles/transcripts/notes,
+  writing daily journals, clearing an inbox, finding orphan notes (brain-dump), querying the wiki,
+  or running a health check (lint). Tracks projects, meetings, content, revenue, and fitness.
 ---
 
 # Obsidian LLM Wiki
 
-> Based on Andrej Karpathy's LLM Wiki pattern.
-> Original gist: https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f
+An implementation of Andrej Karpathy's LLM Wiki pattern: instead of retrieval on every query, Claude
+**compiles** raw sources into a persistent, cross-referenced markdown wiki. You curate; Claude
+maintains everything. Knowledge compounds.
 
-The core insight: maintaining a knowledge base is tedious not because of the thinking
-but because of the bookkeeping. LLMs handle bookkeeping effortlessly. You feed raw content;
-Claude compiles, cross-references, and maintains the wiki. Result: ~70x more token-efficient
-than RAG because knowledge is compiled once, not retrieved per query.
+## Core Insight
 
----
-
-## When to Activate
-
-- User wants to build or maintain a personal knowledge base / second brain
-- User pastes articles, transcripts, notes and wants them "added to the wiki"
-- User asks questions that should be answered from their accumulated knowledge
-- User says "ingest this", "add this to my wiki", "what do I know about X"
-- User wants to set up Obsidian as a Claude-powered second brain
-- Commands: `/wiki-setup`, `/ingest [source]`, `/wiki-query [question]`,
-  `/process-inbox`, `/lint-wiki`, `/daily-journal`, `/brain-dump`
-
----
+Traditional RAG re-searches raw documents on every query. The LLM Wiki shifts to **compilation**:
+- Raw sources (articles, transcripts, screenshots, URLs) → ingested once
+- Claude writes and cross-links wiki pages → synthesis already exists
+- Queries hit the compiled wiki → instant, cited answers
+- Humans supply sources and ask questions; Claude handles all bookkeeping
 
 ## Three-Layer Architecture
 
 ```
-vault/
-├── raw/                    ← Layer 1: Immutable sources (YOU write here)
+raw/          ← Layer 1: Immutable source material. Never modified by Claude.
+wiki/         ← Layer 2: LLM-owned. Claude creates, edits, cross-references.
+CLAUDE.md     ← Layer 3: Schema/config. Governs how Claude maintains the wiki.
+```
+
+---
+
+## Invocation
+
+Run `/obsidian-llm-wiki` followed by an operation:
+
+| Command | What it does |
+|---------|-------------|
+| `setup` | Initialize vault structure and write CLAUDE.md |
+| `ingest [url\|path\|text]` | Process a source into the wiki |
+| `daily-journal` | Create or update today's daily note |
+| `inbox` | Classify and integrate all inbox/ notes |
+| `brain-dump` | Find orphan notes, fill gaps, surface stale content |
+| `query [question]` | Answer from the wiki with citations |
+| `lint` | Health check: broken links, contradictions, stale claims |
+
+---
+
+## Operation: setup
+
+When the user runs `/obsidian-llm-wiki setup`:
+
+1. **Ask for vault path** if not already running inside one. Default: `~/Documents/Vault/`.
+2. **Create the directory structure**:
+
+```
+{vault}/
+├── raw/                    # Source inbox — drop anything here
 │   ├── articles/
 │   ├── transcripts/
-│   ├── papers/
-│   ├── notes/
-│   ├── inbox/              ← Drop quick thoughts here for /process-inbox
-│   └── assets/             ← Images, screenshots (set as Obsidian attachment folder)
-│
-├── wiki/                   ← Layer 2: LLM-maintained wiki (CLAUDE writes here)
-│   ├── index.md            ← Master catalog — first file read every session
-│   ├── log.md              ← Append-only activity log — never edited, only appended
-│   ├── hot.md              ← ~500-word rolling summary of last 3-5 sessions
-│   ├── concepts/           ← Cross-source technical/theoretical concepts
-│   ├── entities/           ← People, organizations, tools, products
-│   ├── sources/            ← Per-source summary pages
-│   ├── projects/           ← Active and archived project tracking
-│   ├── meetings/           ← Meeting notes → structured pages
-│   ├── content/            ← Articles, videos, books consumed
-│   └── comparisons/        ← Side-by-side analyses
-│
-├── outputs/                ← Layer 3: Reports, lint results, exports (CLAUDE writes)
-│   └── lint-YYYY-MM-DD.md
-│
-└── CLAUDE.md               ← Schema: tells Claude how to operate this vault
+│   ├── screenshots/
+│   └── assets/
+├── inbox/                  # Fleeting thoughts, quick captures
+├── wiki/                   # LLM-generated and maintained
+│   ├── sources/            # One page per ingested source
+│   ├── people/             # Contacts, collaborators, relationships
+│   ├── concepts/           # Ideas, frameworks, mental models
+│   ├── projects/           # Active and archived projects
+│   ├── meetings/           # Meeting notes and decisions
+│   ├── content/            # Content created: posts, videos, writing
+│   ├── revenue/            # Deals, invoices, financial milestones
+│   ├── fitness/            # Workouts, health metrics, sleep
+│   ├── synthesis/          # Comparisons, deep-dives, analyses
+│   ├── index.md            # Master catalog — one line per page
+│   └── log.md              # Chronological operation log
+├── output/                 # Generated reports, exports
+├── daily/                  # Daily notes (YYYY-MM-DD.md)
+├── templates/              # Note templates
+└── CLAUDE.md               # Governs how Claude works here
 ```
 
-**The single most important rule: Claude NEVER modifies `raw/`. It reads only.**
+3. **Write `CLAUDE.md`** in the vault root (see template below).
+4. **Write starter `wiki/index.md`** and **`wiki/log.md`**.
+5. **Write all templates** in `templates/`.
+6. **Confirm** with a summary of what was created.
 
----
-
-## CLAUDE.md Template (place in vault root)
-
-When setting up a new wiki, create this file:
+### CLAUDE.md to write into the vault (verbatim)
 
 ```markdown
-# Wiki Schema
+# Wiki Maintainer Instructions
 
-## Structure
-- `raw/` — immutable source documents. READ ONLY. Never modify.
-- `wiki/` — LLM-generated wiki. You own this entirely. Maintain it.
-- `wiki/index.md` — master catalog. Update on every ingest.
-- `wiki/log.md` — append-only activity log. Append, never edit.
-- `wiki/hot.md` — ~500-word rolling summary of recent sessions. Update each session.
-- `outputs/` — reports, exports, lint results.
+You are the maintainer of this Obsidian knowledge base. Your job is to compile raw sources into a
+structured, cross-referenced wiki. Humans supply sources and ask questions; you handle all bookkeeping
+and synthesis.
 
-## Page Frontmatter (required on every wiki page)
+## Hard Rules
+
+- **Never modify `raw/`** — it is immutable source material.
+- **Always update `wiki/index.md`** when you create or significantly change a wiki page.
+- **Always append to `wiki/log.md`** after every operation (timestamp + what changed).
+- **Use wikilinks** `[[Page Name]]` for all internal cross-references.
+- **Frontmatter** every wiki page with: `type`, `created`, `updated`, `tags`, `sources`.
+- One page per entity (person, concept, project). Merge, don't duplicate.
+- When uncertain about a claim, mark it `> [!question] Unverified:` callout.
+
+## Page Types
+
+| Type | Folder | Purpose |
+|------|--------|---------|
+| source | wiki/sources/ | Summary of one ingested item |
+| person | wiki/people/ | Individual contact or figure |
+| concept | wiki/concepts/ | Idea, framework, mental model |
+| project | wiki/projects/ | Active or archived project |
+| meeting | wiki/meetings/ | Meeting record + decisions |
+| content | wiki/content/ | Published or drafted content |
+| revenue | wiki/revenue/ | Deal, invoice, financial milestone |
+| fitness | wiki/fitness/ | Workout, metric, health record |
+| synthesis | wiki/synthesis/ | Cross-source analysis |
+
+## Frontmatter Schema
+
+```yaml
 ---
-title: Page Title
-type: concept | entity | source-summary | comparison | project | meeting
-sources:
-  - raw/path/to/source.md
-related:
-  - "[[related-page-slug]]"
-created: YYYY-MM-DD
-updated: YYYY-MM-DD
-confidence: high | medium | low
-tags:
-  - domain/subtopic
+type: concept
+title: "Page Title"
+created: 2026-01-01
+updated: 2026-01-01
+tags: []
+sources: []
+related: []
+status: active   # active | archived | stub
+---
+```
+
+## wiki/index.md Format
+
+One line per page:
+`| [[Page]] | type | one-line summary | updated |`
+Keep sorted by type, then alphabetically.
+
+## wiki/log.md Format
+
+```
+## 2026-01-15T14:32 — ingest
+Source: "Article Title"
+Created: [[sources/article-slug]]
+Touched: [[concepts/concept]], [[people/author]]
+```
+
+## Callout Conventions
+
+- `> [!summary]` — key takeaways at top of source pages
+- `> [!quote]` — verbatim excerpts worth preserving
+- `> [!question]` — unverified or needs research
+- `> [!action]` — tasks that emerge from a source
+- `> [!decision]` — decisions made in meetings
+
+## Synthesis Guidelines
+
+When multiple sources touch the same concept:
+1. Update the concept page — add the new perspective, note agreements/contradictions
+2. If contradiction: create a synthesis page comparing the views
+3. Cross-link bidirectionally: concept → sources, source → concept
+
+## Quality Standards
+
+- Every source page must have a `> [!summary]` with 3-5 bullet takeaways
+- Every person page must link to sources where they appear
+- Every project page must have: goal, status, next action, related meetings
+- Stubs (< 3 sentences) get `status: stub` and appear in lint report
+```
+
+### Templates to write in `templates/`
+
+**source.md** — for ingested articles, videos, transcripts:
+```markdown
+---
+type: source
+title: ""
+created: {{date}}
+updated: {{date}}
+tags: []
+url: ""
+author: ""
+sources: []
+related: []
+status: active
 ---
 
-## Naming Conventions
-- Filenames: kebab-case (e.g., attention-mechanism.md)
-- Cross-references: [[wikilinks]] for all internal links
-- Source references: always link back to the raw/ file
+> [!summary]
+> -
+> -
+> -
 
-## Ingest Rules
-1. Read source; identify key concepts, entities, claims
-2. Create/update 8-15 wiki pages across concepts/, entities/, sources/
-3. Use [!contradiction] callouts for conflicts with existing pages
-4. Update wiki/index.md — add new pages, update related pages
-5. Append to wiki/log.md: `## [YYYY-MM-DD] ingest | Source Title`
-6. Update wiki/hot.md with session summary (~500 words)
+## Key Points
 
-## Query Rules
-1. Read wiki/index.md first to find relevant pages
-2. Read those pages; synthesize answer with [[wikilinks]] citations
-3. Answer from wiki content, not from raw/ directly
-4. Optionally save valuable answers as new wiki pages
+## Quotes
 
-## Lint Rules
-Scan for and report:
-- Contradictions between pages (flag with confidence levels)
-- Orphan pages (no incoming wikilinks)
-- Missing pages (referenced via [[wikilink]] but not created)
-- Stale claims (superseded by newer sources)
-- Duplicate concept coverage across multiple pages
-Save results to outputs/lint-YYYY-MM-DD.md
+## Actions
+
+## Related
+```
+
+**project.md**:
+```markdown
+---
+type: project
+title: ""
+created: {{date}}
+updated: {{date}}
+tags: []
+status: active
+---
+
+## Goal
+
+## Status
+
+## Next Action
+
+## Decisions
+
+## Related Meetings
+
+## Related People
+```
+
+**daily.md**:
+```markdown
+---
+type: daily
+date: {{date}}
+---
+
+## Focus
+
+## Done
+
+## Notes
+
+## Inbox
+```
+
+**meeting.md**:
+```markdown
+---
+type: meeting
+title: ""
+date: {{date}}
+attendees: []
+tags: []
+---
+
+## Agenda
+
+## Notes
+
+> [!decision]
+>
+
+## Actions
+
+## Related Projects
+```
+
+**person.md**:
+```markdown
+---
+type: person
+title: ""
+created: {{date}}
+updated: {{date}}
+tags: []
+status: active
+---
+
+## Role / Context
+
+## Key Interactions
+
+## Appears In
 ```
 
 ---
 
-## Core Workflows
+## Operation: ingest
 
-### /wiki-setup — Initialize a new vault
+When the user runs `/obsidian-llm-wiki ingest [source]`:
 
-1. Check if `raw/`, `wiki/`, `outputs/` directories exist; create if not
-2. Check for `CLAUDE.md`; create from template above if not present
-3. Create `wiki/index.md` with empty catalog structure
-4. Create `wiki/log.md` with header
-5. Create `wiki/hot.md` with initialization note
-6. Report: vault is ready, drop files into `raw/` and run `/ingest`
+Source can be: URL → fetch, file path → read, or raw text pasted inline.
+
+### Ingest Workflow
+
+1. **Read** the source completely before writing anything.
+2. **Announce the plan**: list pages you'll create or update.
+3. **Create** `wiki/sources/{slug}.md` from source template:
+   - Fill `> [!summary]` with 3-5 bullet key takeaways
+   - Extract `> [!quote]` for high-value passages
+   - Note `> [!action]` items if source implies tasks
+4. **Update or create** entity pages touched by the source:
+   - People mentioned → `wiki/people/{name}.md`
+   - Concepts introduced → `wiki/concepts/{concept}.md`
+   - Projects referenced → `wiki/projects/{project}.md`
+5. **Cross-link** bidirectionally using wikilinks.
+6. **Update** `wiki/index.md` with all new/changed pages.
+7. **Append** to `wiki/log.md` with timestamp and pages touched.
+8. **Report**: N pages created, M pages updated, key insights.
+
+Typically touches 5–15 pages per source.
+
+---
+
+## Operation: daily-journal
+
+When the user runs `/obsidian-llm-wiki daily-journal`:
+
+1. Check if `daily/YYYY-MM-DD.md` exists for today.
+2. If no: create from `templates/daily.md`.
+3. If yes: read it and ask what to add, or append provided content.
+4. Surface any unresolved `> [!action]` items from yesterday's note.
+5. Check `wiki/projects/` for projects with overdue next actions.
+6. Append to `wiki/log.md`.
+
+---
+
+## Operation: inbox
+
+When the user runs `/obsidian-llm-wiki inbox`:
+
+1. List all files in `inbox/` plus today's daily note `## Inbox` section.
+2. For each item:
+   - Classify: source to ingest? Task? Person? Project update?
+   - Route it: ingest sources, update project pages, create stubs for new entities.
+   - Archive the inbox item to `raw/` after routing.
+3. Report: N items processed, what was created/updated.
+4. Append to `wiki/log.md`.
+
+---
+
+## Operation: brain-dump
+
+When the user runs `/obsidian-llm-wiki brain-dump`:
+
+The **orphan hunter and gap filler**. Surfaces problems you didn't know existed.
+
+1. **Find orphan pages**: wiki pages with no inbound wikilinks.
+2. **Find stubs**: pages with `status: stub` or < 100 words.
+3. **Find stale pages**: `updated` > 30 days ago with `status: active`.
+4. **Find missing pages**: `[[wikilinks]]` referenced but no file exists.
+5. **Find index gaps**: pages not listed in `wiki/index.md`.
+6. **Produce report** in `output/brain-dump-YYYY-MM-DD.md`:
+
+```
+## Orphans (N) — no inbound links
+## Stubs (N) — needs expansion
+## Stale (N) — not updated in 30+ days
+## Missing pages (N) — referenced but don't exist
+## Index gaps (N) — not in index.md
+```
+
+7. Ask: "Fix automatically, or review first?" If auto-fix: expand stubs with placeholders,
+   create missing pages as stubs, update index, cross-link orphans where logical.
+8. Append to `wiki/log.md`.
+
+---
+
+## Operation: query
+
+When the user runs `/obsidian-llm-wiki query [question]`:
+
+1. Search `wiki/index.md` to identify relevant pages.
+2. Read those pages plus their linked pages (one hop).
+3. Synthesize an answer with inline `[[citations]]`.
+4. If the answer reveals a synthesis worth preserving, ask: "Save this as a synthesis page?"
+5. Never fabricate — if the wiki doesn't have it, say so and suggest a source to ingest.
+
+---
+
+## Operation: lint
+
+When the user runs `/obsidian-llm-wiki lint`:
+
+Comprehensive health check. Produces `output/lint-YYYY-MM-DD.md`.
+
+Checks:
+- 🔴 Broken wikilinks (referenced pages that don't exist)
+- 🔴 Pages missing required frontmatter fields
+- 🟡 Orphan pages (no inbound links)
+- 🟡 Stubs (< 100 words, `status: stub`)
+- 🟡 Stale active pages (not updated in 30+ days)
+- 🟡 Index out of sync (pages not in index, or dead index entries)
+- 🟢 Log gaps (pages with no log entry)
+- 🟢 Contradiction flags (same claim stated differently on two pages)
+
+---
+
+## Tracking Domains
+
+| Domain | Folder | Key fields |
+|--------|--------|-----------|
+| Projects | `wiki/projects/` | goal, status, next action, deadline |
+| Meetings | `wiki/meetings/` | date, attendees, decisions, actions |
+| Content | `wiki/content/` | format, platform, published date |
+| Revenue | `wiki/revenue/` | amount, source, date, status |
+| Fitness | `wiki/fitness/` | type, duration, metrics, notes |
+| People | `wiki/people/` | role, relationship, appearances |
+| Concepts | `wiki/concepts/` | definition, sources, related |
+
+---
+
+## Key Behaviors
+
+- **Announce the plan** before writing anything — list pages, then execute.
+- **Never guess** wiki content — derive from sources only.
+- **Always update** `wiki/index.md` and `wiki/log.md` — non-negotiable after every operation.
+- **Prefer updating** existing pages over creating new — merge, don't duplicate.
+- **Use `obsidian` CLI** if available (see `obsidian-cli` skill) for file ops inside a live vault.
+- **Wikilinks are connective tissue** — every named entity gets one.
+- **Mark uncertainty** with `> [!question]` — never silently fabricate.
+
+---
+
+## Running Claude Code Inside the Vault
+
+For persistent wiki maintenance, run Claude Code from the vault root:
 
 ```bash
-mkdir -p raw/articles raw/transcripts raw/papers raw/notes raw/inbox raw/assets
-mkdir -p wiki/concepts wiki/entities wiki/sources wiki/projects wiki/meetings wiki/content wiki/comparisons
-mkdir -p outputs
+cd ~/Documents/Vault
+claude
 ```
 
-### /ingest [source] — Add content to the wiki
+The vault's `CLAUDE.md` loads automatically and governs all behavior. This turns Claude Code into
+a dedicated wiki maintainer for as long as the session runs.
 
-**Input:** a file path in `raw/`, a URL, or pasted content
+For one-shot operations from outside the vault:
 
-1. Read `wiki/index.md` to understand existing wiki structure
-2. Read `wiki/hot.md` for recent session context
-3. Read and process the source material
-4. Identify: key concepts, entities (people/tools/orgs), claims, cross-references
-5. For each concept/entity: check if a wiki page exists (Grep); update or create
-6. Create `wiki/sources/[slug].md` summary page for the source
-7. Update all related existing pages with new connections
-8. Update `wiki/index.md` — add new pages, update existing entry metadata
-9. Append to `wiki/log.md`:
-   ```
-   ## [YYYY-MM-DD] ingest | [Source Title]
-   Pages created: N | Pages updated: M | Source: raw/path/file.md
-   ```
-10. Update `wiki/hot.md` with session summary
-
-**Target: 8-15 wiki pages created/updated per ingest**
-
-### /wiki-query [question] — Answer from accumulated knowledge
-
-1. Read `wiki/index.md` to identify relevant pages
-2. Read those pages (not the raw sources)
-3. Synthesize answer with [[wikilink]] citations
-4. Flag any gaps: "The wiki has no information on X — ingest a source to add it"
-5. Offer to save the answer as a new wiki page if it's non-trivial
-
-### /process-inbox — Classify and integrate quick notes
-
-1. Glob `raw/inbox/` for new files
-2. For each file: classify (concept, project note, meeting, idea, reference)
-3. Route to appropriate wiki section or create new page
-4. Move processed files from `raw/inbox/` to `raw/notes/` (or appropriate subdir)
-5. Update `wiki/index.md` and `wiki/log.md`
-
-### /daily-journal — Capture and integrate a daily note
-
-1. Prompt for or accept today's note (freeform text)
-2. Save to `raw/notes/YYYY-MM-DD.md`
-3. Extract: tasks, decisions, links, people mentioned, projects touched
-4. Update relevant project pages, entity pages, create meeting pages if needed
-5. Append to `wiki/log.md`
-
-### /brain-dump — Fast capture, sort later
-
-Accepts any freeform content. Saves to `raw/inbox/brain-dump-[timestamp].md`.
-Immediately runs `/process-inbox` to classify and integrate.
-
-### /lint-wiki — Health check
-
-1. Read all wiki pages (Glob `wiki/**/*.md`)
-2. Build link graph: find all `[[wikilinks]]`, check each target exists
-3. Find orphan pages: pages with no incoming links
-4. Scan for `[!contradiction]` callouts — list unresolved ones
-5. Check for stale `confidence: low` pages older than 30 days
-6. Check `wiki/index.md` for missing entries (pages not listed)
-7. Save report to `outputs/lint-[YYYY-MM-DD].md`
-8. Print summary: N issues found, top 3 to fix
-
----
-
-## Page Type Formats
-
-### Concept page (`wiki/concepts/[slug].md`)
-```markdown
----
-title: Concept Name
-type: concept
-sources:
-  - raw/articles/source.md
-related:
-  - "[[related-concept]]"
-  - "[[entity-name]]"
-created: YYYY-MM-DD
-updated: YYYY-MM-DD
-confidence: high
-tags:
-  - domain/subtopic
----
-
-# Concept Name
-
-One-paragraph definition.
-
-## Key Claims
-- Claim one (source: [[source-summary-page]])
-- Claim two
-
-## Connections
-Links to related concepts and why they're related.
-
-## Open Questions
-Things the wiki doesn't yet know about this concept.
-```
-
-### Entity page (`wiki/entities/[slug].md`)
-For people, tools, organizations, products. Same frontmatter schema.
-
-### Source summary (`wiki/sources/[slug].md`)
-Per-source distillation: what it says, key claims, concepts introduced,
-entities mentioned, confidence assessment.
-
----
-
-## index.md Structure
-
-```markdown
-# Wiki Index
-Last updated: YYYY-MM-DD | Pages: N | Sources ingested: M
-
-## Concepts (N)
-- [[attention-mechanism]] — self-attention in transformers (2024-01-15, 3 sources)
-- [[retrieval-augmented-generation]] — RAG vs compiled wiki tradeoffs (2024-01-10, 1 source)
-
-## Entities (N)
-- [[andrej-karpathy]] — AI researcher, LLM Wiki author (2024-01-15)
-- [[obsidian]] — knowledge management tool used in this setup (2024-01-10)
-
-## Sources (N)
-- [[karpathy-llm-wiki-gist]] — original LLM Wiki pattern (ingested 2024-01-15)
-
-## Projects (N)
-## Meetings (N)
-## Content (N)
+```bash
+claude --add-dir ~/Documents/Vault "/obsidian-llm-wiki ingest https://example.com/article"
 ```
 
 ---
 
-## log.md Format
+## Sources
 
-Append-only. Never edit existing entries.
-
-```markdown
-# Activity Log
-
-## [2024-01-15] ingest | Karpathy LLM Wiki Gist
-Pages created: 8 | Pages updated: 3 | Source: raw/articles/karpathy-llm-wiki.md
-
-## [2024-01-15] query | What is the difference between RAG and compiled wikis?
-Answer saved: wiki/concepts/rag-vs-compiled-wiki.md
-
-## [2024-01-16] lint | 4 issues found
-Report: outputs/lint-2024-01-16.md
-```
-
----
-
-## Obsidian Integration Tips
-
-- Set `raw/assets/` as your attachment folder in Obsidian settings
-- Install: **Dataview** (query metadata), **Obsidian Git** (auto-sync), **Templater**
-- Enable wikilinks in Obsidian settings (default on)
-- Run Claude Code with the vault folder as working directory
-- Open vault in Obsidian — watch wiki pages appear in real-time as Claude writes
-
----
-
-## Design Principles
-
-1. **Compile once, query many.** Wiki pages are pre-synthesized — not retrieved raw per query.
-2. **raw/ is immutable.** Claude reads, never writes.
-3. **index.md is the entry point.** Read it first, every session.
-4. **log.md is the audit trail.** Append only.
-5. **hot.md is the session bridge.** ~500 words of recent context for fast cold-start.
-6. **8-15 pages per ingest.** Full update across all related pages, not just a summary.
-7. **Contradictions are first-class.** Flag with `[!contradiction]`, don't silently overwrite.
-8. **Confidence degrades.** Stale unverified content drops from `high` to `low`, not deleted.
-9. **The wiki is the product. Chat is the interface.**
+- [Andrej Karpathy's LLM Wiki Gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)
+- [NicholasSpisak/second-brain](https://github.com/NicholasSpisak/second-brain) — reference implementation
+- [LLM Wiki + Obsidian Guide](https://aimaker.substack.com/p/llm-wiki-obsidian-knowledge-base-andrej-karphaty)
